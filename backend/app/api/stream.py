@@ -70,5 +70,7 @@ async def stream_endpoint(websocket: WebSocket):
                 "detections": [d.model_dump() for d in detections],
                 "alerts": [a.model_dump() for a in alerts],
             })
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, ConnectionResetError, RuntimeError):
         pass
+    except Exception as exc:
+        print(f"[ws/stream] Client disconnected or stream ended: {exc}")

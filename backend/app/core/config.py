@@ -51,7 +51,11 @@ class Settings(BaseSettings):
     # frontend into a static bundle and point this at it; main.py mounts it
     # if set. Unset (the default) preserves the normal setup — frontend and
     # backend as separate processes/services (local dev, Docker Compose).
-    frontend_dist_dir: Path | None = None
+    frontend_dist_dir: Path | None = (
+        BASE_DIR / "frontend" / "dist"
+        if (BASE_DIR / "frontend" / "dist").is_dir()
+        else None
+    )
 
     def resolved_device(self) -> str:
         if self.device != "auto":

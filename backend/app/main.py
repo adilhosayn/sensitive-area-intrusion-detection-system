@@ -11,6 +11,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from fastapi.responses import RedirectResponse
+
 from app.api.health import router as health_router
 from app.api.stream import router as stream_router
 from app.api.video import router as video_router
@@ -53,6 +55,11 @@ app.add_middleware(     # CORS middleware allows cross-origin requests from spec
 app.include_router(health_router)
 app.include_router(video_router)
 app.include_router(stream_router)
+
+@app.get("/weapon.html")
+def weapon_redirect():
+    return RedirectResponse(url="/")
+
 
 if settings.frontend_dist_dir and settings.frontend_dist_dir.is_dir():
     # Single-container deploy (e.g. the Hugging Face Space): serve the built

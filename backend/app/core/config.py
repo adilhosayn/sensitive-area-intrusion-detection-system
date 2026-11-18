@@ -23,7 +23,12 @@ class Settings(BaseSettings):
     )
 
     # -- Model --
-    model_path: Path = BASE_DIR / "models" / "yolov8_model.pt"
+    model_path: Path = (
+        BASE_DIR / "models" / "rik_best_best.pt"
+        if (BASE_DIR / "models" / "rik_best_best.pt").exists()
+        else BASE_DIR / "models" / "yolov8_model.pt"
+    )
+    weapon_only_mode: bool = True
     device: str = "auto"  # "auto" | "cpu" | "cuda"
     default_confidence_threshold: float = 0.4
 

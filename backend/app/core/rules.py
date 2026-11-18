@@ -31,7 +31,10 @@ class RuleConfig:
     group_min_count: int = 3                # minimum number of objects to consider "group gathering"
     history_len: int = 30                   # length of track history to maintain; also how long a track
                                              # may go unseen before its open incidents are force-closed
-    weapon_class_names: frozenset[str] = frozenset({"weapon"})
+    weapon_class_names: frozenset[str] = frozenset({
+        "weapon", "pistol", "knife", "gun", "rifle", "handgun", "firearm", "shotgun"
+    })
+    weapon_only_mode: bool = False
 
 
 @dataclass
@@ -87,7 +90,8 @@ class RuleEngine:
                 continue  # this track wasn't seen in the current frame
             alerts.extend(self._evaluate_track(track_id, history, zone, line, frame_id))
 
-        alerts.extend(self._evaluate_group_gathering(detections, frame_id))
+        if not self.config.weapon_only_mode:
+            alerts.extend(self._evaluate_group_gathering(detections, frame_id))
         alerts.extend(self._close_stale_incidents(frame_id))
         return alerts
 
@@ -179,10 +183,14 @@ class RuleEngine:
         weapon_active = latest.class_name.lower() in self.config.weapon_class_names
         alert = self._evaluate_incident(
             track_id, "weapon_detected", weapon_active, frame_id,
-            ended_message=lambda d: f"Weapon no longer visible (track {track_id}, was visible for {d:.1f}s)",
+            started_message=f"CRITICAL: Weapon detected ({latest.class_name}) on track #{track_id}",
+            ended_message=lambda d: f"Weapon clear: {latest.class_name} no longer visible (track #{track_id}, was visible for {d:.1f}s)",
         )
         if alert:
             alerts.append(alert)
+
+        if self.config.weapon_only_mode:
+            return alerts
 
         zone_active = self._inside_zone(curr_center, zone)
         alert = self._evaluate_incident(

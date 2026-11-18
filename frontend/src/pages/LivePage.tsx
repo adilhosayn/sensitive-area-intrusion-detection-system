@@ -149,12 +149,16 @@ export function LivePage() {
 
   return (
     <section className="page">
-      <h1>Live Camera Detection</h1>
+      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <h1>Live Camera Detection</h1>
+        <span style={{ backgroundColor: "#ef4444", color: "#ffffff", padding: "4px 10px", borderRadius: "6px", fontSize: "0.85rem", fontWeight: "bold" }}>
+          WEAPON DETECTION DEMO
+        </span>
+      </div>
       <p className="muted">
-        Streams webcam frames to the backend over a WebSocket at ~5 fps and
-        renders the annotated result in real time. One tracker + rule engine
-        is kept alive for the whole connection, so speed/zone/line/stationary
-        rules work correctly across frames instead of resetting every message.
+        Real-time AI weapon surveillance stream. The dedicated computer vision model scans webcam
+        frames for weapons (pistols, knives, firearms), highlighting armed threats with instant bounding boxes,
+        critical telemetry, and audio alarms.
       </p>
 
       <div className="live-controls">
@@ -164,7 +168,10 @@ export function LivePage() {
         ) : (
           <button onClick={stop}>Stop Camera</button>
         )}
-        <span className="muted">{detectionCount} object(s) tracked</span>
+        <span className="muted">{detectionCount} threat(s) tracked</span>
+        <span style={{ marginLeft: "auto", fontSize: "0.85rem", color: "#ef4444", fontWeight: 600 }}>
+          Target Classes: Pistols, Knives, Firearms
+        </span>
       </div>
 
       {errorMessage && <p className="error-text">{errorMessage}</p>}

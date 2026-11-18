@@ -16,7 +16,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.core import registry
 from app.core.config import settings
-from app.core.rules import RuleEngine
+from app.core.rules import RuleConfig, RuleEngine
 from app.core.tracker import ObjectTracker
 from app.services.pipeline import process_frame
 
@@ -38,8 +38,8 @@ async def stream_endpoint(websocket: WebSocket):
         await websocket.close(code=1011)
         return
 
-    tracker = ObjectTracker()
-    rule_engine = RuleEngine(fps=ASSUMED_LIVE_STREAM_FPS)
+    tracker = ObjectTracker(n_init=1)
+    rule_engine = RuleEngine(RuleConfig(weapon_only_mode=settings.weapon_only_mode), fps=ASSUMED_LIVE_STREAM_FPS)
     frame_id = 0
 
     try:

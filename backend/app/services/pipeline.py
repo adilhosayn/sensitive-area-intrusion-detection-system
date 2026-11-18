@@ -11,12 +11,15 @@ from pathlib import Path
 
 import cv2
 
+from app.core.audio import trigger_weapon_siren
+from app.core.config import settings
 from app.core.detector import YOLODetector
-from app.core.rules import RuleEngine
+from app.core.rules import RuleConfig, RuleEngine
 from app.core.tracker import ObjectTracker
 from app.schemas.detection import Alert, Detection
 
-_BOX_COLOR = (0, 255, 0)
+_BOX_COLOR_DEFAULT = (0, 255, 0)
+_BOX_COLOR_WEAPON = (0, 0, 255)
 
 
 def process_frame(
@@ -44,6 +47,9 @@ def process_frame(
     tracks = tracker.update(yolo_dets, frame)
 
     detections: list[Detection] = []
+    has_weapon = False
+    weapon_class_name = ""
+
     for track in tracks:
         if not track.is_confirmed():
             continue
@@ -51,6 +57,14 @@ def process_frame(
         bx1, by1, bx2, by2 = map(int, track.to_ltrb())
         cls_name = track.get_det_class() or "unknown"
         conf = track.get_det_conf() or 0.0
+        is_weapon = cls_name.lower() in rule_engine.config.weapon_class_names
+
+        if rule_engine.config.weapon_only_mode and not is_weapon:
+            continue
+
+        if is_weapon:
+            has_weapon = True
+            weapon_class_name = cls_name
 
         detections.append(Detection(
             track_id=int(track.track_id),
@@ -60,13 +74,45 @@ def process_frame(
         ))
 
         if draw:
-            cv2.rectangle(frame, (bx1, by1), (bx2, by2), _BOX_COLOR, 2)
+            box_color = _BOX_COLOR_WEAPON if is_weapon else _BOX_COLOR_DEFAULT
+            thickness = 3 if is_weapon else 2
+            cv2.rectangle(frame, (bx1, by1), (bx2, by2), box_color, thickness)
+
+            label = (
+                f"WARNING: WEAPON ({cls_name.upper()}) #{track.track_id} {conf:.2f}"
+                if is_weapon
+                else f"{cls_name} #{track.track_id}"
+            )
+            (lw, lh), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+            cv2.rectangle(frame, (bx1, max(by1 - lh - 8, 0)), (bx1 + lw + 6, max(by1, lh + 8)), box_color, -1)
             cv2.putText(
-                frame, f"{cls_name} #{track.track_id}", (bx1, max(by1 - 8, 0)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, _BOX_COLOR, 2,
+                frame, label, (bx1 + 3, max(by1 - 4, lh + 4)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255) if is_weapon else (0, 0, 0), 2,
             )
 
     alerts = rule_engine.process_frame(frame_id, detections, width, height)
+
+    # Top visual HUD banner
+    if draw:
+        if has_weapon or any(a.type == "weapon_detected" and a.event == "started" for a in alerts):
+            cv2.rectangle(frame, (0, 0), (width, 42), (0, 0, 220), -1)
+            banner = f"CRITICAL ALERT: WEAPON IN SIGHT ({weapon_class_name.upper() or 'THREAT'})"
+            (bw, bh), _ = cv2.getTextSize(banner, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+            cv2.putText(
+                frame, banner, (max((width - bw) // 2, 10), 29),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA,
+            )
+        elif rule_engine.config.weapon_only_mode:
+            cv2.rectangle(frame, (0, 0), (width, 28), (30, 30, 30), -1)
+            status_text = "WEAPON SURVEILLANCE ACTIVE - SCANNING FOR FIREARMS & KNIVES"
+            cv2.putText(
+                frame, status_text, (12, 19),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 120), 1, cv2.LINE_AA,
+            )
+
+    if any(a.type == "weapon_detected" and a.event == "started" for a in alerts):
+        trigger_weapon_siren()
+
     return frame, detections, alerts
 
 
@@ -92,7 +138,7 @@ def run_video_job(job, input_path: Path, output_path: Path, confidence_threshold
     # Real fps from the source video, so alert cooldowns are wall-clock
     # accurate (e.g. "at most one zone_intrusion alert per 2 seconds")
     # rather than an arbitrary frame count.
-    rule_engine = RuleEngine(fps=fps)
+    rule_engine = RuleEngine(RuleConfig(weapon_only_mode=settings.weapon_only_mode), fps=fps)
     job.total_frames = total_frames
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

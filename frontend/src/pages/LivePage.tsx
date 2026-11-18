@@ -15,6 +15,56 @@ interface StreamMessage {
   error?: string;
 }
 
+// Web Audio emergency siren generator
+let webAudioCtx: AudioContext | null = null;
+let lastWebAlarmTime = 0;
+
+export function playLoudWebAlarm() {
+  const nowMs = Date.now();
+  if (nowMs - lastWebAlarmTime < 1500) return;
+  lastWebAlarmTime = nowMs;
+
+  try {
+    const AudioContextClass =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return;
+    if (!webAudioCtx) {
+      webAudioCtx = new AudioContextClass();
+    }
+    if (webAudioCtx.state === "suspended") {
+      webAudioCtx.resume();
+    }
+
+    const t = webAudioCtx.currentTime;
+    const osc = webAudioCtx.createOscillator();
+    const gain = webAudioCtx.createGain();
+
+    osc.type = "sawtooth";
+    // Rapid European police siren sweep (1200Hz to 2400Hz)
+    osc.frequency.setValueAtTime(1400, t);
+    osc.frequency.linearRampToValueAtTime(2400, t + 0.12);
+    osc.frequency.linearRampToValueAtTime(1400, t + 0.24);
+    osc.frequency.linearRampToValueAtTime(2400, t + 0.36);
+    osc.frequency.linearRampToValueAtTime(1400, t + 0.48);
+    osc.frequency.linearRampToValueAtTime(2400, t + 0.60);
+    osc.frequency.linearRampToValueAtTime(1400, t + 0.72);
+
+    // Full volume output through browser soundcard
+    gain.gain.setValueAtTime(1.0, t);
+    gain.gain.linearRampToValueAtTime(1.0, t + 0.70);
+    gain.gain.linearRampToValueAtTime(0.01, t + 0.78);
+
+    osc.connect(gain);
+    gain.connect(webAudioCtx.destination);
+
+    osc.start(t);
+    osc.stop(t + 0.78);
+  } catch (err) {
+    console.warn("Web audio playback error:", err);
+  }
+}
+
 export function LivePage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -96,6 +146,20 @@ export function LivePage() {
     setConnection("connecting");
 
     try {
+      if (!webAudioCtx) {
+        const AudioContextClass =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (AudioContextClass) webAudioCtx = new AudioContextClass();
+      }
+      if (webAudioCtx && webAudioCtx.state === "suspended") {
+        webAudioCtx.resume();
+      }
+    } catch {
+      // Audio unlock non-fatal
+    }
+
+    try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       streamRef.current = stream;
       if (videoRef.current) {
@@ -131,6 +195,12 @@ export function LivePage() {
       setDetectionCount(data.detections?.length ?? 0);
       if (data.alerts && data.alerts.length > 0) {
         setAlerts((prev) => [...prev, ...data.alerts!].slice(-300));
+        const isWeaponThreat = data.alerts.some(
+          (a) => a.type === "weapon_detected" && a.event === "started"
+        );
+        if (isWeaponThreat) {
+          playLoudWebAlarm();
+        }
       }
     };
 
@@ -168,6 +238,19 @@ export function LivePage() {
         ) : (
           <button onClick={stop}>Stop Camera</button>
         )}
+        <button
+          type="button"
+          onClick={() => playLoudWebAlarm()}
+          style={{
+            backgroundColor: "#dc2626",
+            color: "#ffffff",
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+          title="Play test alarm sound through speakers"
+        >
+          🔊 Test Siren
+        </button>
         <span className="muted">{detectionCount} threat(s) tracked</span>
         <span style={{ marginLeft: "auto", fontSize: "0.85rem", color: "#ef4444", fontWeight: 600 }}>
           Target Classes: Pistols, Knives, Firearms

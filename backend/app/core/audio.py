@@ -9,8 +9,8 @@ _last_siren_time = 0.0
 _lock = threading.Lock()
 
 
-def trigger_weapon_siren(cooldown_seconds: float = 3.0) -> bool:
-    """Triggers an emergency siren asynchronously on Windows. Rate-limited."""
+def trigger_weapon_siren(cooldown_seconds: float = 2.0) -> bool:
+    """Triggers an urgent, loud emergency siren asynchronously on Windows. Rate-limited."""
     global _last_siren_time
     if sys.platform != "win32":
         return False
@@ -24,12 +24,16 @@ def trigger_weapon_siren(cooldown_seconds: float = 3.0) -> bool:
     def _play():
         try:
             import winsound
-            # Alternating high/low alert siren
-            for _ in range(2):
-                winsound.Beep(1600, 140)
-                time.sleep(0.04)
-                winsound.Beep(900, 140)
-                time.sleep(0.04)
+            # Trigger native Windows Critical Stop alert sound through mixer
+            winsound.MessageBeep(winsound.MB_ICONHAND)
+
+            # High-intensity piercing frequency alternating police siren
+            # (2600Hz and 1900Hz are peak resonance for human ear and PC speakers)
+            for _ in range(3):
+                winsound.Beep(2600, 140)
+                time.sleep(0.02)
+                winsound.Beep(1900, 140)
+                time.sleep(0.02)
         except Exception:
             pass
 

@@ -52,13 +52,15 @@ def process_frame(
         cls_id = int(box.cls[0])
         cls_name = results.names[cls_id]
 
+        is_weapon = cls_name.lower() in rule_engine.config.weapon_class_names
+
         bw_frac = (x2 - x1) / width
         bh_frac = (y2 - y1) / height
-        # Handheld weapons are never half the screen: reject oversized full-body false alarms
-        if rule_engine.config.weapon_only_mode and (bw_frac > 0.40 and bh_frac > 0.40):
+        # Handheld weapons (guns, knives) do not occupy more than 45% of width/height
+        # or 16% of frame area: reject oversized human face/torso false alarms
+        if is_weapon and (bw_frac > 0.42 or bh_frac > 0.45 or (bw_frac * bh_frac > 0.16)):
             continue
 
-        is_weapon = cls_name.lower() in rule_engine.config.weapon_class_names
         if is_weapon:
             raw_weapon_candidates.append(([x1, y1, x2, y2], conf, cls_name))
 

@@ -18,6 +18,7 @@ from app.core import registry
 from app.core.config import settings
 from app.core.rules import RuleConfig, RuleEngine
 from app.core.tracker import ObjectTracker
+from app.core.weapon_engine import TemporalWeaponTracker
 from app.services.pipeline import process_frame
 
 router = APIRouter(tags=["Live Stream"])
@@ -40,6 +41,7 @@ async def stream_endpoint(websocket: WebSocket):
 
     tracker = ObjectTracker(n_init=1)
     rule_engine = RuleEngine(RuleConfig(weapon_only_mode=settings.weapon_only_mode), fps=ASSUMED_LIVE_STREAM_FPS)
+    weapon_tracker = TemporalWeaponTracker(confirmation_frames=2, iou_threshold=0.25)
     frame_id = 0
 
     try:
@@ -54,6 +56,7 @@ async def stream_endpoint(websocket: WebSocket):
             annotated, detections, alerts = process_frame(
                 frame, detector, tracker, rule_engine, frame_id,
                 confidence_threshold=settings.default_confidence_threshold,
+                weapon_tracker=weapon_tracker,
             )
 
             ok, jpeg = cv2.imencode(".jpg", annotated)

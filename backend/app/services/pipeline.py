@@ -16,10 +16,16 @@ from app.core.config import settings
 from app.core.detector import YOLODetector
 from app.core.rules import RuleConfig, RuleEngine
 from app.core.tracker import ObjectTracker
+from app.core.weapon_engine import (
+    CandidateDetection,
+    TemporalWeaponTracker,
+    associate_weapons_with_people,
+)
 from app.schemas.detection import Alert, Detection
 
 _BOX_COLOR_DEFAULT = (0, 255, 0)
 _BOX_COLOR_WEAPON = (0, 0, 255)
+_BOX_COLOR_ARMED_PERSON = (0, 140, 255)
 
 
 def process_frame(
@@ -28,8 +34,9 @@ def process_frame(
     tracker: ObjectTracker,
     rule_engine: RuleEngine,
     frame_id: int,
-    confidence_threshold: float = 0.4,
+    confidence_threshold: float = 0.45,
     draw: bool = True,
+    weapon_tracker: TemporalWeaponTracker | None = None,
 ) -> tuple[object, list[Detection], list[Alert]]:
     """Run one frame through the full pipeline. Mutates `frame` in place when
     `draw=True` and also returns it, so callers can chain calls easily."""
@@ -37,6 +44,8 @@ def process_frame(
     results = detector.detect(frame, confidence_threshold)
 
     yolo_dets = []
+    raw_weapon_candidates: list[tuple[list[int], float, str]] = []
+
     for box in results.boxes:
         conf = float(box.conf[0])
         x1, y1, x2, y2 = map(int, box.xyxy[0])
@@ -46,24 +55,41 @@ def process_frame(
         bw_frac = (x2 - x1) / width
         bh_frac = (y2 - y1) / height
         # Handheld weapons are never half the screen: reject oversized full-body false alarms
-        if rule_engine.config.weapon_only_mode and (bw_frac > 0.45 and bh_frac > 0.45):
+        if rule_engine.config.weapon_only_mode and (bw_frac > 0.40 and bh_frac > 0.40):
             continue
+
+        is_weapon = cls_name.lower() in rule_engine.config.weapon_class_names
+        if is_weapon:
+            raw_weapon_candidates.append(([x1, y1, x2, y2], conf, cls_name))
 
         yolo_dets.append(([x1, y1, x2 - x1, y2 - y1], conf, cls_name))
 
     tracks = tracker.update(yolo_dets, frame)
 
+    # Multi-frame temporal confirmation and spatial person association
+    confirmed_weapons: list[CandidateDetection] = []
+    if weapon_tracker is not None:
+        confirmed_weapons = weapon_tracker.update(raw_weapon_candidates, frame_id, width, height)
+        person_boxes = [
+            (int(t.track_id), list(map(int, t.to_ltrb())))
+            for t in tracks
+            if (t.get_det_class() or "").lower() == "person"
+        ]
+        if confirmed_weapons and person_boxes:
+            associate_weapons_with_people(confirmed_weapons, person_boxes)
+
     detections: list[Detection] = []
     has_weapon = False
-    weapon_class_name = ""
+    weapon_summary = ""
 
+    # Process confirmed tracker objects
     for track in tracks:
         cls_name = track.get_det_class() or "unknown"
         conf = track.get_det_conf() or 0.0
         is_weapon = cls_name.lower() in rule_engine.config.weapon_class_names
 
-        # Accept confirmed tracks, or instant high-confidence weapon detections
-        if not track.is_confirmed() and not (is_weapon and conf >= 0.4):
+        # Accept confirmed tracks or instant high-confidence weapons
+        if not track.is_confirmed() and not (is_weapon and conf >= 0.40):
             continue
 
         if rule_engine.config.weapon_only_mode and not is_weapon:
@@ -72,7 +98,7 @@ def process_frame(
         bx1, by1, bx2, by2 = map(int, track.to_ltrb())
         if is_weapon:
             has_weapon = True
-            weapon_class_name = cls_name
+            weapon_summary = cls_name
 
         detections.append(Detection(
             track_id=int(track.track_id),
@@ -98,13 +124,33 @@ def process_frame(
                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255) if is_weapon else (0, 0, 0), 2,
             )
 
+    # Draw person-weapon association overlays if confirmed by temporal tracker
+    if draw and confirmed_weapons:
+        has_weapon = True
+        for cw in confirmed_weapons:
+            cbx1, cby1, cbx2, cby2 = cw.bbox
+            cv2.rectangle(frame, (cbx1, cby1), (cbx2, cby2), _BOX_COLOR_WEAPON, 3)
+            if cw.associated_person_id is not None:
+                w_label = f"ARMED SUSPECT #{cw.associated_person_id}: {cw.class_name.upper()} ({cw.confidence:.2f})"
+                weapon_summary = f"{cw.class_name.upper()} (Person #{cw.associated_person_id})"
+            else:
+                w_label = f"WEAPON: {cw.class_name.upper()} ({cw.confidence:.2f})"
+                weapon_summary = cw.class_name.upper()
+
+            (wlw, wlh), _ = cv2.getTextSize(w_label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+            cv2.rectangle(frame, (cbx1, max(cby1 - wlh - 8, 0)), (cbx1 + wlw + 6, max(cby1, wlh + 8)), _BOX_COLOR_WEAPON, -1)
+            cv2.putText(
+                frame, w_label, (cbx1 + 3, max(cby1 - 4, wlh + 4)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2,
+            )
+
     alerts = rule_engine.process_frame(frame_id, detections, width, height)
 
     # Top visual HUD banner
     if draw:
         if has_weapon or any(a.type == "weapon_detected" and a.event == "started" for a in alerts):
             cv2.rectangle(frame, (0, 0), (width, 42), (0, 0, 220), -1)
-            banner = f"CRITICAL ALERT: WEAPON IN SIGHT ({weapon_class_name.upper() or 'THREAT'})"
+            banner = f"CRITICAL ALERT: WEAPON IN SIGHT ({weapon_summary or 'THREAT'})"
             (bw, bh), _ = cv2.getTextSize(banner, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
             cv2.putText(
                 frame, banner, (max((width - bw) // 2, 10), 29),
@@ -147,6 +193,7 @@ def run_video_job(job, input_path: Path, output_path: Path, confidence_threshold
     # accurate (e.g. "at most one zone_intrusion alert per 2 seconds")
     # rather than an arbitrary frame count.
     rule_engine = RuleEngine(RuleConfig(weapon_only_mode=settings.weapon_only_mode), fps=fps)
+    weapon_tracker = TemporalWeaponTracker(confirmation_frames=2, iou_threshold=0.25)
     job.total_frames = total_frames
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -170,6 +217,7 @@ def run_video_job(job, input_path: Path, output_path: Path, confidence_threshold
 
             annotated, _detections, alerts = process_frame(
                 frame, detector, tracker, rule_engine, frame_id, confidence_threshold,
+                weapon_tracker=weapon_tracker,
             )
             writer.write(annotated)
             job.alerts.extend(alerts)

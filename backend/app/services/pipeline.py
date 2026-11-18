@@ -42,6 +42,13 @@ def process_frame(
         x1, y1, x2, y2 = map(int, box.xyxy[0])
         cls_id = int(box.cls[0])
         cls_name = results.names[cls_id]
+
+        bw_frac = (x2 - x1) / width
+        bh_frac = (y2 - y1) / height
+        # Handheld weapons are never half the screen: reject oversized full-body false alarms
+        if rule_engine.config.weapon_only_mode and (bw_frac > 0.45 and bh_frac > 0.45):
+            continue
+
         yolo_dets.append(([x1, y1, x2 - x1, y2 - y1], conf, cls_name))
 
     tracks = tracker.update(yolo_dets, frame)
@@ -51,17 +58,18 @@ def process_frame(
     weapon_class_name = ""
 
     for track in tracks:
-        if not track.is_confirmed():
-            continue
-
-        bx1, by1, bx2, by2 = map(int, track.to_ltrb())
         cls_name = track.get_det_class() or "unknown"
         conf = track.get_det_conf() or 0.0
         is_weapon = cls_name.lower() in rule_engine.config.weapon_class_names
 
+        # Accept confirmed tracks, or instant high-confidence weapon detections
+        if not track.is_confirmed() and not (is_weapon and conf >= 0.4):
+            continue
+
         if rule_engine.config.weapon_only_mode and not is_weapon:
             continue
 
+        bx1, by1, bx2, by2 = map(int, track.to_ltrb())
         if is_weapon:
             has_weapon = True
             weapon_class_name = cls_name

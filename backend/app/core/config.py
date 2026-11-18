@@ -24,13 +24,17 @@ class Settings(BaseSettings):
 
     # -- Model --
     model_path: Path = (
-        BASE_DIR / "models" / "rik_best_best.pt"
-        if (BASE_DIR / "models" / "rik_best_best.pt").exists()
-        else BASE_DIR / "models" / "yolov8_model.pt"
+        BASE_DIR / "models" / "weapon_model.pt"
+        if (BASE_DIR / "models" / "weapon_model.pt").exists()
+        else (
+            BASE_DIR / "models" / "rik_best_best.pt"
+            if (BASE_DIR / "models" / "rik_best_best.pt").exists()
+            else BASE_DIR / "models" / "yolov8_model.pt"
+        )
     )
     weapon_only_mode: bool = True
     device: str = "auto"  # "auto" | "cpu" | "cuda"
-    default_confidence_threshold: float = 0.4
+    default_confidence_threshold: float = 0.45
 
     # -- Storage --
     upload_dir: Path = BASE_DIR / "data" / "uploads"
